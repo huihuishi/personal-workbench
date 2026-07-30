@@ -99,27 +99,8 @@ export default function HomePage() {
       if (error) throw error;
 
       if (data.user) {
-        // 创建用户 profile
-        await supabase.from('users').insert({
-          id: data.user.id,
-          phone,
-          role: 'admin',
-        });
-
-        // 创建默认菜单权限
-        const { data: menus } = await supabase
-          .from('menu_config')
-          .select('*');
-        if (menus) {
-          await supabase.from('user_menu_permissions').insert(
-            menus.map((m: { key: string; default_enabled: boolean }) => ({
-              user_id: data.user!.id,
-              menu_key: m.key,
-              enabled: m.default_enabled,
-            }))
-          );
-        }
-
+        // 触发器 handle_new_user 会自动创建 users 记录和默认菜单权限
+        // 不需要手动创建，否则会重复
         toast.success('注册成功，请登录');
         setMode('login');
       }
