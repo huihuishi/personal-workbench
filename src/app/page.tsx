@@ -99,8 +99,50 @@ export default function HomePage() {
       if (error) throw error;
 
       if (data.user) {
-        // 触发器 handle_new_user 会自动创建 users 记录和默认菜单权限
-        // 不需要手动创建，否则会重复
+        const userId = data.user.id;
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY || '';
+        const adminHeaders: Record<string, string> = {
+          'Authorization': `Bearer ${serviceKey}`,
+          'apikey': serviceKey,
+          'Content-Type': 'application/json',
+        };
+
+        // 1. 自动确认邮箱
+        try {
+          await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
+            method: 'PUT',
+            headers: adminHeaders,
+            body: JSON.stringify({ email_confirm: true }),
+          });
+        } catch (e) {
+          console.error('自动确认邮箱失败:', e);
+        }
+
+        // 2. 创建 users 记录（触发器可能失败，手动保底）
+        try {
+          await fetch(`${supabaseUrl}/rest/v1/users`, {
+            method: 'POST',
+            headers: { ...adminHeaders, 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ id: userId, phone, role: 'admin' }),
+          });
+        } catch (e) {
+          console.error('创建用户记录失败:', e);
+        }
+
+        // 3. 创建默认菜单权限
+        try {
+          const menuItems = ['dashboard','calendar','finance','learning','notes','goals','items','wardrobe','notifications','asset_analysis'];
+          const perms = menuItems.map(k => ({ user_id: userId, menu_key: k, enabled: true }));
+          await fetch(`${supabaseUrl}/rest/v1/user_menu_permissions`, {
+            method: 'POST',
+            headers: { ...adminHeaders, 'Prefer': 'return=minimal' },
+            body: JSON.stringify(perms),
+          });
+        } catch (e) {
+          console.error('创建菜单权限失败:', e);
+        }
+
         toast.success('注册成功，请登录');
         setMode('login');
       }

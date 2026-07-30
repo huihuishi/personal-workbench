@@ -272,19 +272,20 @@ CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO users (id, phone, role)
-  VALUES (
-    NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'phone', ''),
-    'admin'
-  );
+  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_data->>'phone', ''), 'admin')
+  ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO user_menu_permissions (user_id, menu_key, enabled)
-  SELECT NEW.id, key, default_enabled
-  FROM menu_config;
+  SELECT NEW.id, key, default_enabled FROM menu_config
+  ON CONFLICT (user_id, menu_key) DO NOTHING;
 
   INSERT INTO income_cycles (user_id, name, cycle_type, is_default)
-  VALUES (NEW.id, '每月', 'monthly', true);
+  VALUES (NEW.id, '每月', 'monthly', true)
+  ON CONFLICT DO NOTHING;
 
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Trigger error: %', SQLERRM;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
