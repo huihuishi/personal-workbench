@@ -43,7 +43,7 @@ export default function HomePage() {
     setSubmitting(true);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: `${phone}@workbench.local`,
+        email: `${phone}@gmail.com`,
         password,
       });
       if (error) throw error;
@@ -88,7 +88,7 @@ export default function HomePage() {
     }
     setSubmitting(true);
     try {
-      const email = `${phone}@workbench.local`;
+      const email = `${phone}@gmail.com`;
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
