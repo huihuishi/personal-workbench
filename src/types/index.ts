@@ -47,6 +47,7 @@ export interface BankCard {
   category: string;          // 可配置类别
   is_large_expense: boolean; // 是否大额支出
   visible_to: string[];      // 对哪些 user_id 可见
+  balance: number;           // 余额
   sort_order: number;
   created_at: string;
 }
