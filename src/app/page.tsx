@@ -124,7 +124,9 @@ export default function HomePage() {
         setMode('login');
       }
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : '注册失败');
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      console.error('注册错误:', err);
+      toast.error(`注册失败: ${msg}`);
     } finally {
       setSubmitting(false);
     }
