@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,91614,t=>{"use strict";var e=t.i(46400);t.s(["default",0,function(){return(0,e.jsxs)("div",{children:[(0,e.jsx)("h1",{className:"text-xl font-bold text-gray-800 mb-2",children:"📅 日程"}),(0,e.jsx)("p",{className:"text-sm text-gray-400",children:"日程管理模块开发中..."})]})}])}]);

@@ -1,0 +1,20 @@
+{
+  "envId": "flower-stats-v20260402001-89a456",
+  "functionRoot": "./cloudfunctions",
+  "functions": [
+    {
+      "name": "workbench",
+      "timeout": 30,
+      "runtime": "Nodejs18",
+      "handler": "index.main",
+      "memorySize": 512,
+      "triggers": [
+        {
+          "name": "http",
+          "type": "http",
+          "path": "/"
+        }
+      ]
+    }
+  ]
+}
