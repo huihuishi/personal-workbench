@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/lib/stores/auth-store';
+import { supabase } from '@/lib/supabase';
 import { DEFAULT_MENUS, MENU_ICON_MAP, MENU_ROUTES } from '@/lib/menu-config';
-import { Menu, X, LogOut, ChevronLeft } from 'lucide-react';
+import { Menu, X, LogOut } from 'lucide-react';
 import type { MenuKey } from '@/types';
 
 export function Sidebar() {
@@ -21,8 +22,14 @@ export function Sidebar() {
   };
 
   const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.error('退出登录失败:', e);
+    }
     logout();
     router.push('/');
+    router.refresh();
   };
 
   return (

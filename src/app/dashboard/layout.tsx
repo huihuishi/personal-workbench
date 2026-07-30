@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/stores/auth-store';
+import { supabase } from '@/lib/supabase';
 import { Sidebar } from '@/components/layout/Sidebar';
 
 export default function DashboardLayout({
@@ -18,6 +19,16 @@ export default function DashboardLayout({
       router.replace('/');
     }
   }, [user, isLoading, router]);
+
+  // 监听 auth 状态变化，确保退出登录后正确跳转
+  useEffect(() => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        router.replace('/');
+      }
+    });
+    return () => listener.subscription.unsubscribe();
+  }, [router]);
 
   if (isLoading) {
     return (
