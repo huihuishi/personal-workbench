@@ -54,7 +54,7 @@ export default function DashboardPage() {
         .order('created_at', { ascending: false })
         .limit(5);
 
-      // 获取本月收支
+      // 获取本月支出
       const monthStart = new Date();
       monthStart.setDate(1);
       monthStart.setHours(0, 0, 0, 0);
@@ -62,9 +62,18 @@ export default function DashboardPage() {
         .from('expense_records')
         .select('amount')
         .eq('user_id', user!.id)
-        .gte('expense_date', monthStart.toISOString());
+        .gte('expense_date', monthStart.toISOString().split('T')[0]);
 
       const monthlyExpense = expenses?.reduce((sum, e) => sum + e.amount, 0) || 0;
+
+      // 获取本月收入
+      const { data: incomes } = await supabase
+        .from('income_records')
+        .select('amount')
+        .eq('user_id', user!.id)
+        .gte('period_start', monthStart.toISOString().split('T')[0]);
+
+      const monthlyIncome = incomes?.reduce((sum, i) => sum + i.amount, 0) || 0;
 
       // 获取银行卡总资产
       const { data: cards } = await supabase
@@ -74,7 +83,7 @@ export default function DashboardPage() {
 
       setData({
         total_assets: cards?.reduce((sum: number, c: { balance?: number }) => sum + (c.balance || 0), 0) || 0,
-        monthly_income: 0,
+        monthly_income: monthlyIncome,
         monthly_expense: monthlyExpense,
         today_events: events || [],
         learning_progress: (skills || []).map((s: { name: string; progress: number }) => ({
