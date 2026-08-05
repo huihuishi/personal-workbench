@@ -9,6 +9,7 @@ export const DEFAULT_MENUS: MenuConfig[] = [
   { key: 'goals', label: '年度目标', icon: 'Target', defaultEnabled: true },
   { key: 'items', label: '物品管理', icon: 'Package', defaultEnabled: true },
   { key: 'wardrobe', label: '衣服搭配', icon: 'Shirt', defaultEnabled: true },
+  { key: 'family', label: '家庭共享', icon: 'Users', defaultEnabled: true },
   { key: 'notifications', label: '通知中心', icon: 'Bell', defaultEnabled: true },
   { key: 'asset_analysis', label: '资产分析', icon: 'PieChart', defaultEnabled: true },
 ];
@@ -22,6 +23,7 @@ export const MENU_ICON_MAP: Record<string, string> = {
   Target: '🎯',
   Package: '📦',
   Shirt: '👗',
+  Users: '👨‍👩‍👧‍👦',
   Bell: '🔔',
   PieChart: '📈',
 };
@@ -35,6 +37,7 @@ export const MENU_ROUTES: Record<MenuKey, string> = {
   goals: '/dashboard/goals',
   items: '/dashboard/items',
   wardrobe: '/dashboard/wardrobe',
+  family: '/dashboard/family',
   notifications: '/dashboard/notifications',
   asset_analysis: '/dashboard/asset-analysis',
 };

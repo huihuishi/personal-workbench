@@ -4,7 +4,7 @@ export interface User {
   phone: string;
   nickname?: string;
   avatar_url?: string;
-  family_id?: string;
+  family_id?: string | null;
   role: UserRole;
   created_at: string;
 }
@@ -20,6 +20,7 @@ export type MenuKey =
   | 'goals'
   | 'items'
   | 'wardrobe'
+  | 'family'
   | 'notifications'
   | 'dashboard'
   | 'asset_analysis';
