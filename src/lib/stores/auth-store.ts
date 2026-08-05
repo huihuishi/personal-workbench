@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import type { User, MenuKey, UserMenuPermission } from '@/types';
+import { DEFAULT_MENUS } from '@/lib/menu-config';
 
 interface AuthState {
   user: User | null;
@@ -24,7 +25,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hasMenuAccess: (key) => {
     const perms = get().menuPermissions;
     const perm = perms.find((p) => p.menu_key === key);
-    return perm ? perm.enabled : false;
+    if (!perm) {
+      // 无显式权限记录时，回退到菜单的 defaultEnabled（默认启用的菜单即使用户无权限行也应可见）
+      const menu = DEFAULT_MENUS.find((m) => m.key === key);
+      return menu ? menu.defaultEnabled : false;
+    }
+    return perm.enabled;
   },
   logout: () => set({ user: null, menuPermissions: [] }),
 }));
