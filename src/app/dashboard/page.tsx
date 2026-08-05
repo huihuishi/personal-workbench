@@ -8,6 +8,8 @@ import {
   GraduationCap, Bell, Target,
 } from 'lucide-react';
 import type { DashboardData } from '@/types';
+import { format } from 'date-fns';
+import { getDayUtcRange } from '@/lib/datetime';
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
@@ -35,14 +37,14 @@ export default function DashboardPage() {
         .eq('user_id', user!.id)
         .eq('is_read', false);
 
-      // 获取今日日程
-      const today = new Date().toISOString().split('T')[0];
+      // 获取今日日程（用 UTC 边界过滤，避免 GMT+8 下凌晨事件被算到前一天）
+      const { gte: evGte, lte: evLte } = getDayUtcRange();
       const { data: events } = await supabase
         .from('calendar_events')
         .select('*')
         .eq('user_id', user!.id)
-        .gte('start_time', `${today}T00:00:00`)
-        .lte('start_time', `${today}T23:59:59`)
+        .gte('start_time', evGte)
+        .lte('start_time', evLte)
         .order('start_time')
         .limit(5);
 
@@ -62,7 +64,7 @@ export default function DashboardPage() {
         .from('expense_records')
         .select('amount')
         .eq('user_id', user!.id)
-        .gte('expense_date', monthStart.toISOString().split('T')[0]);
+        .gte('expense_date', format(monthStart, 'yyyy-MM-dd'));
 
       const monthlyExpense = expenses?.reduce((sum, e) => sum + e.amount, 0) || 0;
 
@@ -71,7 +73,7 @@ export default function DashboardPage() {
         .from('income_records')
         .select('amount')
         .eq('user_id', user!.id)
-        .gte('period_start', monthStart.toISOString().split('T')[0]);
+        .gte('period_start', format(monthStart, 'yyyy-MM-dd'));
 
       const monthlyIncome = incomes?.reduce((sum, i) => sum + i.amount, 0) || 0;
 

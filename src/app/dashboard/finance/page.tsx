@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { format, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import type { BankCard, ExpenseRecord, IncomeRecord, IncomeCycle } from '@/types';
+import { parseCsvExpenses } from '@/lib/finance/csv';
 import { Wallet, Plus, X, CreditCard, TrendingDown, TrendingUp, Upload, Trash2, Edit2 } from 'lucide-react';
 
 type Tab = 'overview' | 'cards' | 'expense' | 'income' | 'import';
@@ -220,33 +221,22 @@ export default function FinancePage() {
     if (!csvCardId) { toast.error('请选择银行卡'); return; }
     if (!csvText.trim()) { toast.error('请输入CSV数据'); return; }
     try {
-      const lines = csvText.trim().split('\n');
-      let count = 0;
-      for (const line of lines) {
-        const parts = line.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
-        if (parts.length < 2) continue;
-        const amount = Number(parts[0]);
-        const date = parts[1] || format(new Date(), 'yyyy-MM-dd');
-        const category = parts[2] || '';
-        const desc = parts[3] || '';
-        if (isNaN(amount)) continue;
-
+      const fallbackDate = format(new Date(), 'yyyy-MM-dd');
+      const parsed = parseCsvExpenses(csvText, fallbackDate);
+      for (const p of parsed) {
         await supabase.from('expense_records').insert({
           user_id: user.id,
           card_id: csvCardId,
-          amount,
-          category: category || null,
-          description: desc || null,
-          expense_date: date,
+          amount: p.amount,
+          category: p.category,
+          description: p.description,
+          expense_date: p.date,
           is_large: false,
         });
-        count++;
       }
-      // 更新卡余额
-      const totalExp = lines.reduce((s, line) => {
-        const parts = line.split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
-        return s + (Number(parts[0]) || 0);
-      }, 0);
+      const count = parsed.length;
+      // 余额扣减金额 === 实际入库金额，保证账目一致
+      const totalExp = parsed.reduce((s, p) => s + p.amount, 0);
       const card = cards.find(c => c.id === csvCardId);
       if (card) {
         await supabase.from('bank_cards').update({

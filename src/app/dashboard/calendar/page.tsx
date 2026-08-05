@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { addMonths, format, isSameDay, isSameMonth, getDay } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { getCalendarGrid, getLunarDate, getLunarFestival, getSolarFestival, isToday, formatTime, parseNaturalDate } from '@/lib/calendar/utils';
+import { getMonthUtcRange } from '@/lib/datetime';
 import type { CalendarEvent } from '@/types';
 import { ChevronLeft, ChevronRight, Plus, Clock, Calendar as CalIcon, X, Repeat, Moon } from 'lucide-react';
 
@@ -31,14 +32,13 @@ export default function CalendarPage() {
     if (!user) return;
     setLoading(true);
     try {
-      const monthStart = format(currentDate, 'yyyy-MM-01');
-      const monthEnd = format(addMonths(currentDate, 1), 'yyyy-MM-01');
+      const { gte: monthGte, lt: monthLt } = getMonthUtcRange(currentDate);
       const { data, error } = await supabase
         .from('calendar_events')
         .select('*')
         .eq('user_id', user.id)
-        .gte('start_time', monthStart)
-        .lt('start_time', monthEnd)
+        .gte('start_time', monthGte)
+        .lt('start_time', monthLt)
         .order('start_time', { ascending: true });
       if (error) throw error;
       setEvents(data || []);
