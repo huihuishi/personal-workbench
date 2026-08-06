@@ -5,41 +5,22 @@ import { useAuthStore } from '@/lib/stores/auth-store';
 import { supabase } from '@/lib/supabase';
 import type { User } from '@/types';
 
-/** 查询 users 资料行，缺失时尝试用 service_key 自愈补建 */
+/**
+ * 查询 users 资料行。
+ * 注意：启用 RLS(auth.uid()=id) 后，登录后紧接的查询可能因 session/JWT 尚未传播
+ * 而 auth.uid() 为 null，导致 RLS 过滤成 0 行。这里先确保 session 就绪并 retry 一次。
+ * 注册时 on_auth_user_created 触发器已保证 users 行存在，无需在此插入。
+ */
 async function ensureUserProfile(authUserId: string): Promise<User | null> {
-  const { data: profile } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', authUserId)
-    .single();
+  await supabase.auth.getSession();
 
-  if (profile) return profile;
-
-  // 资料行缺失 → 自愈补建
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY || '';
-  if (!serviceKey) return null;
-
-  try {
-    const adminHeaders: Record<string, string> = {
-      'Authorization': `Bearer ${serviceKey}`,
-      'apikey': serviceKey,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation',
-    };
-    const res = await fetch(`${supabaseUrl}/rest/v1/users`, {
-      method: 'POST',
-      headers: adminHeaders,
-      body: JSON.stringify({ id: authUserId, phone: '', role: 'admin' }),
-    });
-    if (res.ok) {
-      const created = await res.json();
-      return Array.isArray(created) ? created[0] : created;
-    }
-  } catch (e) {
-    console.error('AuthProvider 自愈创建用户记录失败:', e);
+  const q = () => supabase.from('users').select('*').eq('id', authUserId).single();
+  let resp = await q();
+  if (!resp.data) {
+    await new Promise((r) => setTimeout(r, 500));
+    resp = await q();
   }
-  return null;
+  return (resp.data as User) ?? null;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -57,7 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const { data: perms } = await supabase
               .from('user_menu_permissions')
               .select('*')
-              .eq('user_id', (profile as { id: string }).id);
+              .eq('user_id', profile.id);
             if (perms) setMenuPermissions(perms);
           }
         }

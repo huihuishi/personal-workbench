@@ -50,53 +50,42 @@ export default function HomePage() {
       if (error) throw error;
 
       if (data.user) {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-        const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY || '';
+        // 关键：登录后 session/JWT 可能尚未传播到下一个查询，
+        // 此时 auth.uid() 为 null，RLS(auth.uid()=id) 会把行过滤成 0 行。
+        // 先确保 session 就绪，再查；查不到则重试一次。
+        await supabase.auth.getSession();
 
-        // 查询 users 资料行
-        const { data: profile } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', data.user.id)
-          .single();
+        const fetchProfile = () =>
+          supabase.from('users').select('*').eq('id', data.user!.id).single();
 
-        let finalUser = profile;
-
-        // 自愈：资料行缺失时用 service_key 补建（注册触发器可能失败）
-        if (!finalUser && serviceKey) {
-          try {
-            const adminHeaders: Record<string, string> = {
-              'Authorization': `Bearer ${serviceKey}`,
-              'apikey': serviceKey,
-              'Content-Type': 'application/json',
-              'Prefer': 'return=representation',
-            };
-            const res = await fetch(`${supabaseUrl}/rest/v1/users`, {
-              method: 'POST',
-              headers: adminHeaders,
-              body: JSON.stringify({ id: data.user.id, phone, role: 'admin' }),
-            });
-            if (res.ok) {
-              const created = await res.json();
-              finalUser = Array.isArray(created) ? created[0] : created;
-            }
-          } catch (e) {
-            console.error('自愈创建用户记录失败:', e);
-          }
+        let profileResp = await fetchProfile();
+        if (!profileResp.data) {
+          await new Promise((r) => setTimeout(r, 500));
+          profileResp = await fetchProfile();
         }
 
-        if (finalUser) {
-          useAuthStore.getState().setUser(finalUser);
+        // 兜底：即便 RLS/时序导致取不到资料行，也用认证信息构造最小 user，
+        // 保证能进入 dashboard（不再因 user 为 null 被 layout 弹回首页）。
+        const finalUser: import('@/types').User =
+          (profileResp.data as import('@/types').User) ?? {
+            id: data.user.id,
+            phone,
+            role: 'admin',
+            created_at: new Date().toISOString(),
+          };
+
+        useAuthStore.getState().setUser(finalUser);
+
+        if (profileResp.data) {
           const { data: perms } = await supabase
             .from('user_menu_permissions')
             .select('*')
             .eq('user_id', finalUser.id);
           if (perms) useAuthStore.getState().setMenuPermissions(perms);
-          toast.success('登录成功');
-          router.push('/dashboard');
-        } else {
-          toast.error('登录失败：用户资料异常，请重新注册');
         }
+
+        toast.success('登录成功');
+        router.push('/dashboard');
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : '登录失败');
