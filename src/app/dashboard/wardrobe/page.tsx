@@ -227,8 +227,11 @@ export default function WardrobePage() {
         prev.map((c) => (c.id === cloth.id ? { ...c, cutout_url: data.cutoutUrl } : c)),
       );
       toast.success('抠图完成，搭配更自然了');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '抠图失败');
+    } catch (err: unknown) {
+      // 显示详细错误信息（含 HTTP 状态码/Function 具体返回），便于排查
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      console.error('抠图失败详情:', err);
+      toast.error(`抠图失败: ${msg}`, { duration: 5000 });
     } finally {
       setCutoutLoadingId(null);
     }
