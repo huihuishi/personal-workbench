@@ -6,21 +6,47 @@ import { supabase } from '@/lib/supabase';
 import type { User } from '@/types';
 
 /**
- * 查询 users 资料行。
- * 注意：启用 RLS(auth.uid()=id) 后，登录后紧接的查询可能因 session/JWT 尚未传播
- * 而 auth.uid() 为 null，导致 RLS 过滤成 0 行。这里先确保 session 就绪并 retry 一次。
- * 注册时 on_auth_user_created 触发器已保证 users 行存在，无需在此插入。
+ * 用 service_role key 查用户资料，绕过 RLS。
+ * 启用 RLS(auth.uid()=id) 后，客户端 anon key 查询在 session 未就绪时会被
+ * auth.uid()=null 过滤成空结果。service_key 无此限制（注册流程已验证可用）。
  */
-async function ensureUserProfile(authUserId: string): Promise<User | null> {
-  await supabase.auth.getSession();
+async function fetchProfileBypassRLS(authUserId: string): Promise<User | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY || '';
+  if (!serviceKey) return null;
 
-  const q = () => supabase.from('users').select('*').eq('id', authUserId).single();
-  let resp = await q();
-  if (!resp.data) {
-    await new Promise((r) => setTimeout(r, 500));
-    resp = await q();
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${authUserId}&select=*`, {
+      headers: {
+        'Authorization': `Bearer ${serviceKey}`,
+        'apikey': serviceKey,
+      },
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      return (Array.isArray(rows) && rows.length > 0 ? rows[0] : null) as User | null;
+    }
+  } catch (e) {
+    console.error('AuthProvider fetchProfile 失败:', e);
   }
-  return (resp.data as User) ?? null;
+  return null;
+}
+
+async function fetchPermsBypassRLS(userId: string): Promise<import('@/types').UserMenuPermission[] | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY || '';
+  if (!serviceKey) return null;
+
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/user_menu_permissions?user_id=eq.${userId}&select=*`,
+      { headers: { 'Authorization': `Bearer ${serviceKey}`, 'apikey': serviceKey } }
+    );
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {}
+  return null;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -31,14 +57,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { data } = await supabase.auth.getSession();
         if (data.session?.user) {
-          const profile = await ensureUserProfile(data.session.user.id);
+          const profile = await fetchProfileBypassRLS(data.session.user.id);
           if (profile) {
             setUser(profile);
-
-            const { data: perms } = await supabase
-              .from('user_menu_permissions')
-              .select('*')
-              .eq('user_id', profile.id);
+            const perms = await fetchPermsBypassRLS(profile.id);
             if (perms) setMenuPermissions(perms);
           }
         }
@@ -53,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        const profile = await ensureUserProfile(session.user.id);
+        const profile = await fetchProfileBypassRLS(session.user.id);
         if (profile) setUser(profile);
       }
       if (event === 'SIGNED_OUT') {

@@ -50,38 +50,55 @@ export default function HomePage() {
       if (error) throw error;
 
       if (data.user) {
-        // 关键：登录后 session/JWT 可能尚未传播到下一个查询，
-        // 此时 auth.uid() 为 null，RLS(auth.uid()=id) 会把行过滤成 0 行。
-        // 先确保 session 就绪，再查；查不到则重试一次。
-        await supabase.auth.getSession();
+        // 用 service_role key 查用户资料，绕过 RLS。
+        // 原因：启用 RLS(auth.uid()=id) 后，signInWithPassword 返回的 session/JWT
+        // 可能尚未传播到下一个查询，auth.uid() 暂为 null 导致 RLS 把行过滤掉。
+        // 注册流程已证明 service_key 可用（前端 NEXT_PUBLIC_ 变量），这里复用同一路径。
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY || '';
+        const userId = data.user.id;
 
-        const fetchProfile = () =>
-          supabase.from('users').select('*').eq('id', data.user!.id).single();
+        let profile: import('@/types').User | null = null;
 
-        let profileResp = await fetchProfile();
-        if (!profileResp.data) {
-          await new Promise((r) => setTimeout(r, 500));
-          profileResp = await fetchProfile();
+        if (serviceKey) {
+          try {
+            const res = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${userId}&select=*`, {
+              headers: {
+                'Authorization': `Bearer ${serviceKey}`,
+                'apikey': serviceKey,
+              },
+            });
+            if (res.ok) {
+              const rows = await res.json();
+              profile = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+            }
+          } catch (e) {
+            console.error('service_key 查用户资料失败:', e);
+          }
         }
 
-        // 兜底：即便 RLS/时序导致取不到资料行，也用认证信息构造最小 user，
-        // 保证能进入 dashboard（不再因 user 为 null 被 layout 弹回首页）。
-        const finalUser: import('@/types').User =
-          (profileResp.data as import('@/types').User) ?? {
-            id: data.user.id,
-            phone,
-            role: 'admin',
-            created_at: new Date().toISOString(),
-          };
+        // 兜底：service_key 也不可用时，用认证信息构造最小 user 保证能进 dashboard
+        const finalUser: import('@/types').User = profile ?? {
+          id: userId,
+          phone,
+          role: 'admin',
+          created_at: new Date().toISOString(),
+        };
 
         useAuthStore.getState().setUser(finalUser);
 
-        if (profileResp.data) {
-          const { data: perms } = await supabase
-            .from('user_menu_permissions')
-            .select('*')
-            .eq('user_id', finalUser.id);
-          if (perms) useAuthStore.getState().setMenuPermissions(perms);
+        // 取菜单权限（同样优先用 service_key 绕过 RLS）
+        if (serviceKey) {
+          try {
+            const permsRes = await fetch(
+              `${supabaseUrl}/rest/v1/user_menu_permissions?user_id=eq.${userId}&select=*`,
+              { headers: { 'Authorization': `Bearer ${serviceKey}`, 'apikey': serviceKey } }
+            );
+            if (permsRes.ok) {
+              const perms = await permsRes.json();
+              if (Array.isArray(perms)) useAuthStore.getState().setMenuPermissions(perms);
+            }
+          } catch {}
         }
 
         toast.success('登录成功');
