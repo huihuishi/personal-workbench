@@ -234,6 +234,35 @@ export default function WardrobePage() {
     }
   };
 
+  // 一键抠图所有未处理的衣物
+  const handleBatchCutout = async () => {
+    if (!user) return;
+    const pending = clothing.filter((c) => !c.cutout_url);
+    if (pending.length === 0) { toast('所有衣物已抠图'); return; }
+    setCutoutLoadingId('batch');
+    let ok = 0, fail = 0;
+    for (const c of pending) {
+      try {
+        const { data, error } = await supabase.functions.invoke('cutout', {
+          body: { imageUrl: c.image_url, userId: user.id },
+        });
+        if (error || !data?.cutoutUrl) { fail++; continue; }
+        const { error: upErr } = await supabase
+          .from('clothing_items')
+          .update({ cutout_url: data.cutoutUrl })
+          .eq('id', c.id);
+        if (upErr) { fail++; continue; }
+        setClothing((prev) => prev.map((item) =>
+          item.id === c.id ? { ...item, cutout_url: data.cutoutUrl } : item
+        ));
+        ok++;
+      } catch { fail++; }
+    }
+    setCutoutLoadingId(null);
+    if (fail === 0) toast.success(`全部完成！${ok} 件衣物已抠图`);
+    else toast(`完成 ${ok} 件，${fail} 件失败（可单独重试）`);
+  };
+
   // ==================== 搭配预览 ====================
   const addClothingToPreview = (c: ClothingItem) => {
     if (!selectedBody) {
@@ -519,7 +548,26 @@ export default function WardrobePage() {
           {clothing.length === 0 ? (
             <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 text-sm">衣物库还是空的</div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="space-y-3">
+              {/* 一键抠图全部 + 提示 */}
+              <div className="flex items-center justify-between bg-purple-50 rounded-lg px-3 py-2">
+                <span className="text-xs text-purple-700">
+                  {clothing.filter((c) => c.cutout_url).length}/{clothing.length} 件已抠图
+                  {!clothing.every((c) => c.cutout_url) && '，未抠图的衣服叠加时会挡住人体'}
+                </span>
+                <button
+                  onClick={handleBatchCutout}
+                  disabled={cutoutLoadingId !== null || clothing.every((c) => c.cutout_url)}
+                  className={`text-xs px-3 py-1.5 rounded-md font-medium transition ${
+                    cutoutLoadingId !== null || clothing.every((c) => c.cutout_url)
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-purple-500 text-white hover:bg-purple-600 active:scale-95'
+                  }`}
+                >
+                  {cutoutLoadingId !== null ? '⏳ 处理中...' : '✨ 一键抠图全部'}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {clothing.map((c) => (
                 <div key={c.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="relative">
@@ -541,33 +589,31 @@ export default function WardrobePage() {
                         decoding="async"
                       />
                     </div>
+                    {/* 删除按钮 */}
                     <button
                       onClick={() => deleteCloth(c.id)}
-                      className="absolute top-1 right-1 p-1 bg-black/50 text-white rounded hover:bg-red-500"
+                      className="absolute top-1 right-1 p-1.5 bg-black/60 text-white rounded-full hover:bg-red-500"
                       title="删除"
                     >
-                      <Trash2 size={12} />
+                      <Trash2 size={14} />
                     </button>
-                    <button
-                      onClick={() => handleCutout(c)}
-                      disabled={cutoutLoadingId === c.id || !!c.cutout_url}
-                      title={c.cutout_url ? '已抠图' : '智能抠图'}
-                      className={`absolute top-1 left-1 p-1 rounded text-white ${
-                        c.cutout_url
-                          ? 'bg-green-500 cursor-default'
-                          : 'bg-purple-500 hover:bg-purple-600 disabled:opacity-50'
-                      }`}
-                    >
-                      {cutoutLoadingId === c.id ? (
-                        <span className="block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <Sparkles size={12} />
-                      )}
-                    </button>
-                    {c.cutout_url && (
-                      <span className="absolute bottom-1 left-1 text-[10px] bg-green-500 text-white px-1.5 py-0.5 rounded">
-                        已抠图
+                    {/* 抠图按钮：大号文字按钮，一眼可见 */}
+                    {c.cutout_url ? (
+                      <span className="absolute bottom-1 left-1 right-1 text-center text-[11px] bg-green-500 text-white px-2 py-1 rounded-md font-medium">
+                        ✅ 已抠图
                       </span>
+                    ) : (
+                      <button
+                        onClick={() => handleCutout(c)}
+                        disabled={cutoutLoadingId === c.id}
+                        className={`absolute bottom-1 left-1 right-1 text-center text-[12px] px-2 py-1.5 rounded-md font-medium transition ${
+                          cutoutLoadingId === c.id
+                            ? 'bg-purple-400 text-white'
+                            : 'bg-purple-500 text-white hover:bg-purple-600 active:scale-95'
+                        }`}
+                      >
+                        {cutoutLoadingId === c.id ? '⏳ 抠图中...' : '✨ 智能抠图'}
+                      </button>
                     )}
                   </div>
                   <div className="p-2">
@@ -580,6 +626,7 @@ export default function WardrobePage() {
                   </div>
                 </div>
               ))}
+            </div>
             </div>
           )}
         </div>
@@ -643,7 +690,9 @@ export default function WardrobePage() {
                   <img
                     src={thumbUrl(o.clothing.cutout_url || o.clothing.image_url, 300, 80)}
                     alt={o.clothing.name}
-                    className="w-24 sm:w-28 max-h-40 object-contain pointer-events-none select-none"
+                    className={`w-24 sm:w-28 max-h-40 object-contain pointer-events-none select-none ${
+                      o.clothing.cutout_url ? '' : 'mix-blend-multiply'
+                    }`}
                     draggable={false}
                     loading="lazy"
                     decoding="async"
