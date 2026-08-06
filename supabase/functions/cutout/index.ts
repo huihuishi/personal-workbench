@@ -10,11 +10,11 @@
 // 调用（前端）：
 //   supabase.functions.invoke('cutout', { body: { imageUrl, userId } })
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   removeBackground,
   type Config,
-} from 'https://esm.sh/@imgly/background-removal@1.5.4'
+} from 'https://esm.sh/@imgly/background-removal@1'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
