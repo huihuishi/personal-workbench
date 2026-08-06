@@ -50,22 +50,53 @@ export default function HomePage() {
       if (error) throw error;
 
       if (data.user) {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const serviceKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY || '';
+
+        // 查询 users 资料行
         const { data: profile } = await supabase
           .from('users')
           .select('*')
           .eq('id', data.user.id)
           .single();
 
-        if (profile) {
-          useAuthStore.getState().setUser(profile);
+        let finalUser = profile;
+
+        // 自愈：资料行缺失时用 service_key 补建（注册触发器可能失败）
+        if (!finalUser && serviceKey) {
+          try {
+            const adminHeaders: Record<string, string> = {
+              'Authorization': `Bearer ${serviceKey}`,
+              'apikey': serviceKey,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation',
+            };
+            const res = await fetch(`${supabaseUrl}/rest/v1/users`, {
+              method: 'POST',
+              headers: adminHeaders,
+              body: JSON.stringify({ id: data.user.id, phone, role: 'admin' }),
+            });
+            if (res.ok) {
+              const created = await res.json();
+              finalUser = Array.isArray(created) ? created[0] : created;
+            }
+          } catch (e) {
+            console.error('自愈创建用户记录失败:', e);
+          }
+        }
+
+        if (finalUser) {
+          useAuthStore.getState().setUser(finalUser);
           const { data: perms } = await supabase
             .from('user_menu_permissions')
             .select('*')
-            .eq('user_id', profile.id);
+            .eq('user_id', finalUser.id);
           if (perms) useAuthStore.getState().setMenuPermissions(perms);
+          toast.success('登录成功');
+          router.push('/dashboard');
+        } else {
+          toast.error('登录失败：用户资料异常，请重新注册');
         }
-        toast.success('登录成功');
-        router.push('/dashboard');
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : '登录失败');
