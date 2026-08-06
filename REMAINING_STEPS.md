@@ -6,13 +6,11 @@
 
 ## 一、需要你协助的事（明天继续）
 
-### 1. 部署抠图 Edge Function（cutout）【我无法直接部署】
-- 代码已就绪：`supabase/functions/cutout/index.ts`（Deno，使用 `@imgly/background-removal`）。
-- 我无法部署的原因：沙箱内 Supabase Management API 返回 401（service role key ≠ Management API key），且无 CLI。
-- 二选一：
-  - **方案 A（推荐，最简单）**：打开 Supabase 控制台 → Edge Functions → 新建 `cutout` → 把 `index.ts` 内容整体粘贴 → Deploy。环境变量需确保有 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`（Deno 运行时自动注入）。
-  - **方案 B**：你生成 Supabase **Personal Access Token** 发我，我用 `supabase functions deploy` 部署。
-- 部署后在「衣橱」模块用任一衣物照片测试抠图按钮。
+### 1. ✅ 部署抠图 Edge Function（cutout）【已完成】
+- 函数已通过 Management API（multipart/form-data 端点）部署到项目 `ashxvhrdogkdzwrsjfci`（HomeLifeVault）
+- slug: `cutout`, version: 3, status: ACTIVE, verify_jwt: false
+- 调用验证通过：函数启动正常，身份校验按预期返回 401
+- **待你操作**：在「衣橱」模块登录后选一张衣物照片，点抠图按钮做端到端验证
 
 ### 2. 推送 GitHub 并触发 Pages 部署【沙箱网络受限】
 - 沙箱出口 DNS 把 `github.com` 解析到 `198.18.0.17`（被拦截），我无法 push。
