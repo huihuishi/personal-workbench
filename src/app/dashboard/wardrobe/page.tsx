@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { runClientCutout } from '@/lib/cutout';
 import { useAuthStore } from '@/lib/stores/auth-store';
 import toast from 'react-hot-toast';
 import type { BodyPhoto, ClothingItem, OutfitCombination } from '@/types';
@@ -58,6 +59,8 @@ const uploadImage = async (file: File, folder: string, userId: string): Promise<
   return data.publicUrl;
 };
 
+// 抠图逻辑见 @/lib/cutout（浏览器端运行，避免 Edge Function 10s 超时）
+
 export default function WardrobePage() {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<Tab>('photos');
@@ -80,6 +83,7 @@ export default function WardrobePage() {
 
   // ---- 抠图 ----
   const [cutoutLoadingId, setCutoutLoadingId] = useState<string | null>(null);
+  const [cutoutProgress, setCutoutProgress] = useState<Record<string, number>>({});
 
   // ---- 搭配预览 ----
   const [selectedBody, setSelectedBody] = useState<BodyPhoto | null>(null);
@@ -204,7 +208,7 @@ export default function WardrobePage() {
     }
   };
 
-  // ==================== 智能抠图 ====================
+  // ==================== 智能抠图（浏览器端） ====================
   const handleCutout = async (cloth: ClothingItem) => {
     if (!user || !cloth.image_url) return;
     if (cloth.cutout_url) {
@@ -212,40 +216,32 @@ export default function WardrobePage() {
       return;
     }
     setCutoutLoadingId(cloth.id);
+    setCutoutProgress((p) => ({ ...p, [cloth.id]: 0 }));
+    const tid = toast.loading('抠图中…首次需下载模型，请稍候');
     try {
-      const { data, error } = await supabase.functions.invoke('cutout', {
-        body: { imageUrl: cloth.image_url, userId: user.id },
+      const cutoutUrl = await runClientCutout(cloth.image_url, user.id, (pct) => {
+        setCutoutProgress((p) => ({ ...p, [cloth.id]: pct }));
       });
-      if (error) throw error;
-      if (!data?.cutoutUrl) throw new Error('未返回抠图结果');
       const { error: upErr } = await supabase
         .from('clothing_items')
-        .update({ cutout_url: data.cutoutUrl })
+        .update({ cutout_url: cutoutUrl })
         .eq('id', cloth.id);
       if (upErr) throw upErr;
       setClothing((prev) =>
-        prev.map((c) => (c.id === cloth.id ? { ...c, cutout_url: data.cutoutUrl } : c)),
+        prev.map((c) => (c.id === cloth.id ? { ...c, cutout_url: cutoutUrl } : c)),
       );
-      toast.success('抠图完成，搭配更自然了');
-    } catch (err: unknown) {
-      // 尝试提取 Function 返回的完整错误结构（Supabase 客户端可能包装了多层）
-      let detail = ''
-      if (err instanceof Error) {
-        detail = err.message
-        // Supabase FunctionsError 可能携带 context(原始响应体)
-        const ctx = (err as Record<string, unknown>).context
-        if (ctx && typeof ctx === 'object') {
-          detail += ` | 详情: ${JSON.stringify(ctx)}`
-        }
-      } else if (typeof err === 'object' && err !== null) {
-        detail = JSON.stringify(err)
-      } else {
-        detail = String(err)
-      }
-      console.error('抠图失败详情:', err)
-      toast.error(`抠图失败: ${detail}`, { duration: 8000 })
+      toast.success('抠图完成，搭配更自然了', { id: tid });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '抠图失败';
+      console.error('抠图失败:', err);
+      toast.error(`抠图失败: ${msg}`, { id: tid, duration: 8000 });
     } finally {
       setCutoutLoadingId(null);
+      setCutoutProgress((p) => {
+        const n = { ...p };
+        delete n[cloth.id];
+        return n;
+      });
     }
   };
 
@@ -258,22 +254,29 @@ export default function WardrobePage() {
     let ok = 0, fail = 0;
     for (const c of pending) {
       try {
-        const { data, error } = await supabase.functions.invoke('cutout', {
-          body: { imageUrl: c.image_url, userId: user.id },
+        const cutoutUrl = await runClientCutout(c.image_url, user.id, (pct) => {
+          setCutoutProgress((p) => ({ ...p, batch: Math.round(pct / pending.length + (ok / pending.length) * 100) }));
         });
-        if (error || !data?.cutoutUrl) { fail++; continue; }
         const { error: upErr } = await supabase
           .from('clothing_items')
-          .update({ cutout_url: data.cutoutUrl })
+          .update({ cutout_url: cutoutUrl })
           .eq('id', c.id);
         if (upErr) { fail++; continue; }
         setClothing((prev) => prev.map((item) =>
-          item.id === c.id ? { ...item, cutout_url: data.cutoutUrl } : item
+          item.id === c.id ? { ...item, cutout_url: cutoutUrl } : item
         ));
         ok++;
-      } catch { fail++; }
+      } catch (err) {
+        console.error('批量抠图单件失败:', c.id, err);
+        fail++;
+      }
     }
     setCutoutLoadingId(null);
+    setCutoutProgress((p) => {
+      const n = { ...p };
+      delete n.batch;
+      return n;
+    });
     if (fail === 0) toast.success(`全部完成！${ok} 件衣物已抠图`);
     else toast(`完成 ${ok} 件，${fail} 件失败（可单独重试）`);
   };
@@ -579,7 +582,7 @@ export default function WardrobePage() {
                       : 'bg-purple-500 text-white hover:bg-purple-600 active:scale-95'
                   }`}
                 >
-                  {cutoutLoadingId !== null ? '⏳ 处理中...' : '✨ 一键抠图全部'}
+                  {cutoutLoadingId === 'batch' ? `⏳ 处理中 ${cutoutProgress.batch ?? 0}%` : '✨ 一键抠图全部'}
                 </button>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -627,7 +630,7 @@ export default function WardrobePage() {
                             : 'bg-purple-500 text-white hover:bg-purple-600 active:scale-95'
                         }`}
                       >
-                        {cutoutLoadingId === c.id ? '⏳ 抠图中...' : '✨ 智能抠图'}
+                        {cutoutLoadingId === c.id ? `⏳ 抠图中 ${cutoutProgress[c.id] ?? 0}%` : '✨ 智能抠图'}
                       </button>
                     )}
                   </div>
