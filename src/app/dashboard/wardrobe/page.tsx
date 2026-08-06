@@ -228,10 +228,22 @@ export default function WardrobePage() {
       );
       toast.success('抠图完成，搭配更自然了');
     } catch (err: unknown) {
-      // 显示详细错误信息（含 HTTP 状态码/Function 具体返回），便于排查
-      const msg = err instanceof Error ? err.message : JSON.stringify(err);
-      console.error('抠图失败详情:', err);
-      toast.error(`抠图失败: ${msg}`, { duration: 5000 });
+      // 尝试提取 Function 返回的完整错误结构（Supabase 客户端可能包装了多层）
+      let detail = ''
+      if (err instanceof Error) {
+        detail = err.message
+        // Supabase FunctionsError 可能携带 context(原始响应体)
+        const ctx = (err as Record<string, unknown>).context
+        if (ctx && typeof ctx === 'object') {
+          detail += ` | 详情: ${JSON.stringify(ctx)}`
+        }
+      } else if (typeof err === 'object' && err !== null) {
+        detail = JSON.stringify(err)
+      } else {
+        detail = String(err)
+      }
+      console.error('抠图失败详情:', err)
+      toast.error(`抠图失败: ${detail}`, { duration: 8000 })
     } finally {
       setCutoutLoadingId(null);
     }

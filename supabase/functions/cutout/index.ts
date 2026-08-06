@@ -1,14 +1,9 @@
 // Supabase Edge Function: 智能抠图（衣物去背景）
 //
-// 功能：接收衣物原图 URL，使用 @imgly/background-removal 在云端完成去背景，
-//      将透明 PNG 结果上传到 wardrobe 存储桶，返回公开访问地址。
+// 调用：supabase.functions.invoke('cutout', { body: { imageUrl, userId } })
 //
-// 部署：
-//   supabase functions deploy cutout --no-verify-jwt
-//   （--no-verify-jwt 由函数内部自行校验用户，避免 JWT 受众不匹配问题）
-//
-// 调用（前端）：
-//   supabase.functions.invoke('cutout', { body: { imageUrl, userId } })
+// 注意：首次调用会下载 ML 模型(~40-70MB)，耗时 10-30 秒属正常。
+//       后续调用(实例预热后)通常 3-10 秒。
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
@@ -31,7 +26,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 Deno.serve(async (req: Request) => {
-  // 预检请求
+  const t0 = Date.now()
+  const log = (step: string) => console.log(`[cutout ${new Date().toISOString()} +${Date.now()-t0}ms] ${step}`)
+
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -40,58 +37,62 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    // --- 1. 环境检查 ---
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
     if (!supabaseUrl || !serviceKey) {
-      return json({ error: '服务端缺少环境变量' }, 500)
+      log('ERROR: 缺少环境变量')
+      return json({ error: '服务端缺少环境变量(SUPABASE_URL / SERVICE_ROLE_KEY)', step: 'env' }, 500)
     }
 
-    // 用 service role 客户端（不受 RLS 限制，负责上传结果图）
-    const admin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
-    })
-
-    // 校验调用者身份（前端 anon 客户端会自动带上用户 JWT）
+    // --- 2. 身份校验 ---
+    const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
     const authHeader = req.headers.get('Authorization') ?? ''
     const token = authHeader.replace(/^Bearer\s+/i, '')
-    const {
-      data: { user },
-      error: authErr,
-    } = await admin.auth.getUser(token)
+    const { data: { user }, error: authErr } = await admin.auth.getUser(token)
     if (authErr || !user) {
-      return json({ error: '未授权，请先登录' }, 401)
+      log(`AUTH_FAIL: ${authErr?.message}`)
+      return json({ error: '未授权，请先登录', detail: authErr?.message }, 401)
     }
+    log(`AUTH_OK: user=${user.id}`)
 
-    const { imageUrl, userId } = (await req.json()) as {
-      imageUrl?: string
-      userId?: string
-    }
+    // --- 3. 参数校验 ---
+    const body = await req.json()
+    const { imageUrl, userId } = body as { imageUrl?: string; userId?: string }
     if (!imageUrl || !userId) {
-      return json({ error: '缺少 imageUrl 或 userId' }, 400)
+      return json({ error: '缺少 imageUrl 或 userId', received: { imageUrl: !!imageUrl, userId: !!userId } }, 400)
     }
-    // 只能对自己的衣物抠图
     if (userId !== user.id) {
       return json({ error: '无权操作他人衣物' }, 403)
     }
+    log(`PARAMS_OK: img=${imageUrl.slice(0,80)}...`)
 
-    // 下载原图
+    // --- 4. 下载原图 ---
+    log('FETCH_IMG: start')
     const imgRes = await fetch(imageUrl)
     if (!imgRes.ok) {
-      return json({ error: '原图下载失败' }, 502)
+      log(`FETCH_IMG_FAIL: HTTP ${imgRes.status}`)
+      return json({ error: `原图下载失败(HTTP ${imgRes.status})`, url: imageUrl.slice(0,100) }, 502)
     }
     const inputBlob = await imgRes.blob()
+    log(`FETCH_IMG_OK: size=${(inputBlob.size/1024/1024).toFixed(1)}MB type=${inputBlob.type}`)
 
-    // 去背景（默认 isnet_fp16 模型，输出透明 PNG）
+    // --- 5. 去背景（ML 模型） ---
+    log('REMOVE_BG: start (首次调用需下载模型 ~40-70MB, 请耐心等待)')
     const config: Config = {
       model: 'isnet_fp16',
       output: { format: 'image/png' },
-      progress: () => {},
+      progress: (key, current, total) => {
+        if (current % 5 === 0 || current === total) {
+          log(`PROGRESS: ${key} ${current}/${total}`)
+        }
+      },
     }
     const cutoutBlob: Blob = await removeBackground(inputBlob, config)
+    log(`REMOVE_BG_OK: output=${(cutoutBlob.size/1024/1024).toFixed(1)}MB took ${Date.now()-t0}ms total`)
 
-    // 上传到存储桶 wardrobe/cutout/{userId}/{timestamp}.png
-    const ext = 'png'
-    const fileName = `cutout/${userId}/${Date.now()}.${ext}`
+    // --- 6. 上传结果 ---
+    const fileName = `cutout/${userId}/${Date.now()}.png`
     const { error: upErr } = await admin.storage
       .from('wardrobe')
       .upload(fileName, cutoutBlob, {
@@ -100,13 +101,26 @@ Deno.serve(async (req: Request) => {
         cacheControl: '3600',
       })
     if (upErr) {
+      log(`UPLOAD_FAIL: ${upErr.message}`)
       return json({ error: '结果图上传失败: ' + upErr.message }, 500)
     }
     const { data } = admin.storage.from('wardrobe').getPublicUrl(fileName)
+    log(`DONE: ${data.publicUrl.slice(0,80)}...`)
 
-    return json({ cutoutUrl: data.publicUrl })
+    return json({ cutoutUrl: data.publicUrl, timingMs: Date.now() - t0 })
+
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    return json({ error: '抠图失败: ' + msg }, 500)
+    log(`CATCH_ERROR: ${msg} stack=${e instanceof Error ? e.stack?.slice(0,300) : ''}`)
+    // 区分超时和其他错误
+    const isTimeout = msg.toLowerCase().includes('timeout') ||
+                       msg.toLowerCase().includes('aborted') ||
+                       msg.toLowerCase().includes('signal')
+    return json({
+      error: '抠图失败: ' + msg,
+      step: isTimeout ? 'timeout' : 'unknown',
+      hint: isTimeout ? '模型可能仍在下载中(首次~40-70MB)，请稍后重试' : undefined,
+      timingMs: Date.now() - t0,
+    }, 500)
   }
 })
